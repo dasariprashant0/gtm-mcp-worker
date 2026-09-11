@@ -354,12 +354,20 @@ ${NO_PUBLISH_HINT}`,
   // -----------------------------------------------------------------------
   server.tool(
     "gtm_get_version",
-    `Fetch one container version in full, including every tag, trigger and variable it contains —
-or pass version_id="live" for whatever is currently published.
+    `Fetch one container version — or pass version_id="live" for whatever is currently published.
 
 "What is actually live on the site right now?" is usually the first question worth answering,
 and the only reliable way to answer it: a workspace shows what someone INTENDS to publish, not
 what visitors are currently getting. Compare against gtm_get_workspace_status to see the delta.
+
+SUMMARISED BY DEFAULT. A container version contains every tag, trigger and variable in full —
+for a real container that is hundreds of thousands of characters, far past what one tool result
+can carry. So this returns version metadata plus an id/name/type index of its contents. That is
+what you want for "what is live" and "does the live version contain tag X".
+
+Set summary=false ONLY for a container you already know is small, or after narrowing with
+entity_type. To read one entity's full configuration, take its ID from the index here and call
+gtm_get_entity against a workspace.
 
 READ ONLY — fetching a version does not publish, restore or alter anything.`,
     {
@@ -368,23 +376,42 @@ READ ONLY — fetching a version does not publish, restore or alter anything.`,
       version_id: z
         .union([z.string(), z.number()])
         .describe('Numeric version ID, or the string "live" for the currently published version.'),
+      summary: z
+        .boolean()
+        .optional()
+        .describe("Default true. false returns the full version and will often be too large."),
+      entity_type: z
+        .string()
+        .optional()
+        .describe("Restrict the index to one type, e.g. 'tag'. Omit for all types."),
+      name_contains: z
+        .string()
+        .optional()
+        .describe("Case-insensitive substring filter on entity names within the version."),
     },
     (args: any) =>
       guard("gtm_get_version", async () => {
         const ids = await resolveIds(ctx, args);
         const base = containerPath(plainIds(ids));
         const raw = String(args.version_id).trim().toLowerCase();
+
+        let url: string;
         if (raw === "live" || raw === "published") {
-          return gtmGet(ctx, `${base}/versions:live`);
-        }
-        if (raw === "latest") return gtmGet(ctx, `${base}/version_headers:latest`);
-        if (!/^\d+$/.test(raw)) {
+          url = `${base}/versions:live`;
+        } else if (raw === "latest") {
+          url = `${base}/version_headers:latest`;
+        } else if (/^\d+$/.test(raw)) {
+          url = `${base}/versions/${raw}`;
+        } else {
           throw new Error(
             `version_id must be numeric, or "live" for the published version, or "latest" for ` +
               `the most recently created one. Call gtm_list_versions to see the IDs.`,
           );
         }
-        return gtmGet(ctx, `${base}/versions/${raw}`);
+
+        const version = (await gtmGet(ctx, url)) as Record<string, unknown>;
+        if (args.summary === false) return version;
+        return summariseVersion(version, args);
       }),
   );
 
@@ -519,5 +546,86 @@ export async function findReferences(
     target: { name: bare || undefined, type: targetType || undefined, id: targetId || undefined },
     reference_count: refs.length,
     references: refs,
+  };
+}
+
+// ===========================================================================
+// Version summarising
+// ===========================================================================
+
+/** The entity collections a ContainerVersion carries inline. */
+const VERSION_COLLECTIONS: [key: string, idField: string][] = [
+  ["tag", "tagId"],
+  ["trigger", "triggerId"],
+  ["variable", "variableId"],
+  ["folder", "folderId"],
+  ["builtInVariable", "type"],
+  ["customTemplate", "templateId"],
+  ["client", "clientId"],
+  ["zone", "zoneId"],
+  ["gtagConfig", "gtagConfigId"],
+  ["transformation", "transformationId"],
+];
+
+/**
+ * A ContainerVersion inlines every entity in full. On a real container that is
+ * hundreds of thousands of characters — more than a single tool result can
+ * carry, and a waste of context even when it fits. So return the metadata plus
+ * an id/name/type index, the same bargain gtm_list_entities makes.
+ */
+export function summariseVersion(
+  version: Record<string, unknown>,
+  opts: { entity_type?: unknown; name_contains?: unknown } = {},
+): Record<string, unknown> {
+  const wanted =
+    typeof opts.entity_type === "string" && opts.entity_type.trim()
+      ? entityMeta(opts.entity_type).itemsKey
+      : undefined;
+
+  const needle =
+    typeof opts.name_contains === "string" && opts.name_contains.trim()
+      ? opts.name_contains.trim().toLowerCase()
+      : undefined;
+
+  const counts: Record<string, number> = {};
+  const contents: Record<string, unknown[]> = {};
+
+  for (const [key, idField] of VERSION_COLLECTIONS) {
+    const list = version[key];
+    if (!Array.isArray(list)) continue;
+    counts[key] = list.length;
+    if (wanted && key !== wanted) continue;
+
+    const rows = list
+      .map((raw) => {
+        const e = raw as Record<string, unknown>;
+        return {
+          id: e[idField],
+          name: e.name,
+          ...(e.type !== undefined ? { type: e.type } : {}),
+          ...(e.paused === true ? { paused: true } : {}),
+          ...(Array.isArray(e.firingTriggerId) ? { firingTriggerId: e.firingTriggerId } : {}),
+        };
+      })
+      .filter((r) => !needle || String(r.name ?? "").toLowerCase().includes(needle));
+
+    contents[key] = rows;
+  }
+
+  return {
+    containerVersionId: version.containerVersionId,
+    name: version.name,
+    description: version.description,
+    deleted: version.deleted,
+    fingerprint: version.fingerprint,
+    tagManagerUrl: version.tagManagerUrl,
+    container: version.container,
+    counts,
+    contents,
+    _summarised: true,
+    _note:
+      "Summarised: entity parameters are omitted because a full container version exceeds what " +
+      "one tool result can carry. Take an ID from 'contents' and call gtm_get_entity against a " +
+      "workspace for that entity's full configuration, or narrow with entity_type/name_contains.",
   };
 }
