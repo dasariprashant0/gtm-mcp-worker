@@ -48,21 +48,28 @@ from Claude.
 
 ### The fix
 
-In the **Cloudflare Zero Trust dashboard** → **Access** → **Applications**, find the
-application whose domain covers `*.YOUR-SUBDOMAIN.workers.dev`, then either:
+This is Cloudflare's **account-level Workers Access** feature: one policy that makes
+every Worker in the account private, current and future. It is *not* an ordinary
+Access application, which is why it does not appear under Zero Trust → Access →
+Applications. Look in **Workers & Pages** instead.
 
-- **Recommended:** narrow that application's domain so it no longer matches these
-  two hostnames, or
-- add a **Bypass** policy (Action: Bypass, Include: Everyone) scoped to
-  `gtm-mcp-worker.YOUR-SUBDOMAIN.workers.dev` and
-  `ga4-mcp-worker.YOUR-SUBDOMAIN.workers.dev`, or
-- delete the application, if it was created automatically and nothing depends on it.
+**Option A — exempt these two Workers (recommended).**
+Workers & Pages → select `gtm-mcp-worker` → the **Access** tab → make the Worker
+public / bypass account-level Access. Repeat for `ga4-mcp-worker`.
 
-Bypassing Access does **not** make these Workers public in any meaningful sense:
-`/mcp` is still gated by an OAuth bearer token issued by the Worker, sign-in still
-requires a Google account, and `ALLOWED_EMAIL_DOMAIN` still restricts that to
-`@example.com`. The only genuinely public routes are `/` (a plain-text banner) and
-`/health` (a configuration summary with no secrets and no Tag Manager data).
+**Option B — narrow the account policy to previews only.**
+Workers & Pages overview → the **"Protect all Workers"** card → change the coverage
+from **All traffic** to **Previews only**. Preview deployments stay protected;
+production `*.workers.dev` hostnames stop redirecting. This is the better option if
+nothing else in the account depends on production Access protection.
+
+**Option C — turn it off.** Same card, disable the rule.
+
+Bypassing Access does **not** make these Workers meaningfully public: `/mcp` is still
+gated by an OAuth bearer token the Worker itself issues, sign-in still requires a
+Google account, and `ALLOWED_EMAIL_DOMAIN` still restricts that to `@example.com`. The
+only genuinely public routes are `/` (a plain-text banner) and `/health` (a
+configuration summary with no secrets and no Tag Manager data).
 
 This was not changed automatically — it is a security setting on the Cloudflare
 account and is yours to decide.
