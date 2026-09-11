@@ -137,7 +137,13 @@ npm run deploy
 npm run tail        # live logs
 ```
 
-`npm run verify` is the gate. It runs `tsc --noEmit`, the allowlist and parameter
+`npm run verify` is the gate, and it runs in CI on every push and pull request
+([.github/workflows/deploy.yml](.github/workflows/deploy.yml)) — a push to `main`
+deploys only if it passes, then asserts `/health` comes back ok. So a change that
+weakens the safety layer fails CI instead of reaching production. CI needs one
+repository secret, `CLOUDFLARE_API_TOKEN`.
+
+Locally it runs `tsc --noEmit`, the allowlist and parameter
 self-checks, two source-discipline checks (nothing outside `http.ts` may call
 `fetch`; the tool layer may not call the write helpers directly), and a bundle
 dry-run. Run it before every deploy.
