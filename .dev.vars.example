@@ -1,0 +1,36 @@
+# Copy to `.dev.vars` for local development with `wrangler dev`.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `.dev.vars` is gitignored. NEVER commit it, paste it into a chat, drop it in
+# a Google Doc, or send it over Slack. If GOOGLE_CLIENT_SECRET leaks, rotate it
+# in Google Cloud Console -> APIs & Services -> Credentials.
+#
+# In production these are NOT read from this file. They are set with
+# `wrangler secret put <NAME>` and stored encrypted by Cloudflare. This file
+# only exists so `wrangler dev` can run against the real Tag Manager API
+# locally.
+#
+# This server runs per-user OAuth: each teammate signs in with their own Google
+# account, so there is no shared refresh token and no shared secret here. Only
+# the app's own registration is needed.
+
+# --- Google OAuth client -----------------------------------------------------
+# Google Cloud Console -> APIs & Services -> Credentials -> the "Web
+# application" OAuth 2.0 Client ID. This is the SAME client the GA4 MCP worker
+# uses; it just needs this worker's /callback added to its Authorised redirect
+# URIs. See SETUP-GUIDE.md.
+GOOGLE_CLIENT_ID="000000000000-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+
+# --- OAUTH_KV is a binding (see [[kv_namespaces]] in wrangler.toml), not a
+# --- secret, so it isn't set here. `wrangler dev` emulates KV locally.
+
+# --- Optional: mirror production's restrictions locally. -------------------
+ALLOWED_EMAIL_DOMAIN="example.com"
+
+# Local development defaults. Flip GTM_MODE to "read_write" and
+# GTM_FORCE_DRY_RUN to "false" only when you intend to make real changes in a
+# throwaway GTM workspace.
+GTM_MODE="read_only"
+GTM_FORCE_DRY_RUN="true"

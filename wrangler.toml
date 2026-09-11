@@ -1,0 +1,87 @@
+name = "gtm-mcp-worker"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# REQUIRED. @modelcontextprotocol/sdk pulls in Node built-ins (node:crypto,
+# node:stream, node:buffer, ...). Without nodejs_compat the Worker fails to
+# bundle, or fails at runtime with "No such module 'node:...'".
+# Do not remove this line.
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# Plain (non-secret) variables. Safe to commit.
+# ---------------------------------------------------------------------------
+[vars]
+
+# Per-user Google OAuth: each teammate signs in with their own Google account,
+# so there is no shared refresh token and no shared password. Mirrors the GA4
+# MCP worker. "secret" mode does not exist here — this server was never
+# deployed with a shared credential and should not acquire one.
+AUTH_MODE = "oauth"
+
+# Only @example.com Google accounts may complete sign-in. Checked server-side in
+# /callback against the id_token, not just passed as a UI hint to Google.
+ALLOWED_EMAIL_DOMAIN = "example.com"
+
+# --- Write safety -----------------------------------------------------------
+# GTM_MODE gates every POST/PUT/DELETE. It defaults to read_only in code too,
+# so a missing var or a typo fails CLOSED.
+#   "read_only"  — reads work, writes refuse before touching the network.
+#   "read_write" — in-workspace writes allowed, subject to every other guard.
+GTM_MODE = "read_only"
+
+# Force every write to behave as dry_run=true regardless of what the caller
+# asks for. Leave "true" for the first week in production: the model sees the
+# exact request body it would have sent, and nothing changes in GTM.
+GTM_FORCE_DRY_RUN = "true"
+
+# Writes to a workspace literally named "Default Workspace" are refused, so
+# agent edits never mix into whatever a human has half-finished there.
+GTM_ALLOW_DEFAULT_WORKSPACE = "false"
+
+# Runaway-loop guard: max mutations per MCP session (per Durable Object).
+# Also the main defence against burning the project-wide GTM API quota.
+GTM_MUTATION_BUDGET = "50"
+
+# ---------------------------------------------------------------------------
+# The MCP session lives in a Durable Object, one per connected client.
+# ---------------------------------------------------------------------------
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "GtmMCP"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GtmMCP"]
+
+# Grant storage. One record per signed-in user; the Google refresh token inside
+# each record is encrypted with AES-GCM by the OAuth provider library. userId
+# and metadata are NOT encrypted, which is why grants are keyed on Google's
+# opaque `sub` rather than on email.
+#
+# This MUST be its own namespace, never shared with ga4-mcp-worker: the grants
+# stored here carry GTM write scope, and the two servers' grants should be
+# revocable independently.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "00000000000000000000000000000000"
+
+# ---------------------------------------------------------------------------
+# Workers Logs. `persist = true` is what makes the JSON log lines this Worker
+# emits queryable in the dashboard rather than only visible live via
+# `wrangler tail`. Every mutation emits one, so this is the audit trail.
+# ---------------------------------------------------------------------------
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
