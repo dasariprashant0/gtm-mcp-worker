@@ -1,0 +1,71 @@
+# Deploy gtm-mcp-worker to Cloudflare.
+#
+# The important part is the gate: `npm run verify` must pass before anything
+# deploys. That runs the typecheck, the 73 allowlist assertions (39 operations
+# that MUST be rejected — publish, create_version, container delete,
+# user_permissions, path traversal — and 34 that must be allowed), the
+# parameter-coercion tests, and the two source-discipline checks.
+#
+# So a change that weakens the safety layer cannot reach production: it fails
+# CI first. That is the whole reason this pipeline exists rather than relying
+# on someone remembering to run the checks locally.
+#
+# Note this deploys wrangler.toml AS COMMITTED, including GTM_MODE and
+# GTM_FORCE_DRY_RUN. Changing those is a deliberate, reviewable commit.
+#
+# Requires one repository secret: CLOUDFLARE_API_TOKEN
+#   Cloudflare dashboard -> My Profile -> API Tokens -> Create Token
+#   -> "Edit Cloudflare Workers" template, scoped to this account.
+#   Then: gh secret set CLOUDFLARE_API_TOKEN --repo dasariprashant0/gtm-mcp-worker
+
+name: Verify and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Never let two deploys race.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Allowlist, parameter and source-discipline checks
+        run: npm run check
+      - name: Bundle (dry run)
+        run: npm run dry-run
+
+  deploy:
+    name: Deploy
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env=""
+      - name: Confirm the deployed Worker is healthy
+        run: |
+          sleep 5
+          curl -sSf https://gtm-mcp-worker.YOUR-SUBDOMAIN.workers.dev/health | tee /dev/stderr | grep -q '"status":"ok"'
