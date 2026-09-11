@@ -27,6 +27,13 @@ export interface Env {
 
   // --- Bindings ------------------------------------------------------------
   OAUTH_KV: KVNamespace;
+  /**
+   * Analytics Engine dataset for tool/mutation telemetry. OPTIONAL on purpose:
+   * it is absent in local dev and on any deploy predating the binding, and a
+   * missing telemetry sink must never break a tool call.
+   * See src/gtm/analytics.ts for the (positional, do-not-reorder) schema.
+   */
+  analytics_engine?: AnalyticsEngineDataset;
   MCP_OBJECT: DurableObjectNamespace;
   /** Injected by OAuthProvider; not a wrangler binding. */
   OAUTH_PROVIDER: OAuthHelpers;

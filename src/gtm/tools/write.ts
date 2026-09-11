@@ -33,7 +33,7 @@ import { normArray, toGtmParameters, toIdList } from "../params.ts";
 import {
   assertDeleteConfirmed,
   assertNoReferences,
-  guard,
+  makeGuard,
   mutate,
   type MutationOp,
 } from "../safety.ts";
@@ -211,6 +211,9 @@ async function updateEntity(
 // ===========================================================================
 
 export function registerWriteTools(server: McpServer, ctx: GtmCtx): void {
+  // Bound once: every guard() below then times and records its tool call.
+  const guard = makeGuard(ctx);
+
   // -----------------------------------------------------------------------
   // gtm_create_workspace
   // -----------------------------------------------------------------------

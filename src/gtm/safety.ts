@@ -17,6 +17,7 @@ import {
   isReadWrite,
   type GtmCtx,
 } from "../env.ts";
+import { recordMutation, recordToolCall } from "./analytics.ts";
 import { gtmDelete, gtmGet, gtmPost, gtmPut, logJson, truncate } from "./http.ts";
 import { workspacePath, type GtmIds } from "./paths.ts";
 
@@ -44,18 +45,30 @@ export function ok(data: unknown): ToolResult {
  * Wraps every handler. Handlers never throw out to the transport: a failure
  * comes back as text with isError, so the model can read the hint and
  * self-correct instead of the connection dropping.
+ *
+ * Bound to a ctx rather than free-standing, so every tool call is timed and
+ * recorded to Analytics Engine without each of the 27 registrations having to
+ * remember to do it. Call sites are unchanged — registerReadTools and
+ * registerWriteTools each open with `const guard = makeGuard(ctx)`.
  */
-export function guard(name: string, fn: () => Promise<unknown>): Promise<ToolResult> {
-  return fn()
-    .then(ok)
-    .catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      logJson({ event: "tool_error", tool: name, message: truncate(message, 600) });
-      return {
-        content: [{ type: "text" as const, text: `Tool '${name}' failed.\n\n${message}` }],
-        isError: true,
-      };
-    });
+export function makeGuard(ctx: GtmCtx) {
+  return function guard(name: string, fn: () => Promise<unknown>): Promise<ToolResult> {
+    const started = Date.now();
+    return fn()
+      .then((data) => {
+        recordToolCall(ctx, name, Date.now() - started);
+        return ok(data);
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logJson({ event: "tool_error", tool: name, message: truncate(message, 600) });
+        recordToolCall(ctx, name, Date.now() - started, message);
+        return {
+          content: [{ type: "text" as const, text: `Tool '${name}' failed.\n\n${message}` }],
+          isError: true,
+        };
+      });
+  };
 }
 
 // ===========================================================================
@@ -193,6 +206,16 @@ export async function mutate(
 
   if (dryRun) {
     logJson({ event: "mutation_dry_run", ...audit });
+    recordMutation(ctx, {
+      tool: plan.op,
+      op: plan.op,
+      entityType: plan.entityType,
+      accountId: plan.ids.accountId,
+      containerId: plan.ids.containerId,
+      workspaceId: plan.ids.workspaceId,
+      dryRun: true,
+      durationMs: 0,
+    });
     return {
       dry_run: true,
       forced_by_server: forced,
@@ -226,14 +249,36 @@ export async function mutate(
       duration_ms: Date.now() - started,
       budget_remaining: ctx.budget.max - ctx.budget.used,
     });
+    recordMutation(ctx, {
+      tool: plan.op,
+      op: plan.op,
+      entityType: plan.entityType,
+      accountId: plan.ids.accountId,
+      containerId: plan.ids.containerId,
+      workspaceId: plan.ids.workspaceId,
+      dryRun: false,
+      durationMs: Date.now() - started,
+    });
     return result;
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logJson({
       event: "mutation_result",
       ...audit,
       outcome: "error",
       duration_ms: Date.now() - started,
-      message: truncate(err instanceof Error ? err.message : String(err), 300),
+      message: truncate(message, 300),
+    });
+    recordMutation(ctx, {
+      tool: plan.op,
+      op: plan.op,
+      entityType: plan.entityType,
+      accountId: plan.ids.accountId,
+      containerId: plan.ids.containerId,
+      workspaceId: plan.ids.workspaceId,
+      dryRun: false,
+      durationMs: Date.now() - started,
+      error: message,
     });
     throw err;
   }

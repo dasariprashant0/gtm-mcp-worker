@@ -23,7 +23,7 @@ import {
   workspacePath,
 } from "../paths.ts";
 import { extractVariableReferences, type GtmParameter } from "../params.ts";
-import { guard } from "../safety.ts";
+import { makeGuard } from "../safety.ts";
 import {
   ENTITIES,
   READ_ENTITY_TYPES,
@@ -50,6 +50,9 @@ const workspaceArg = z
   .describe("Workspace ID. Required — there is no default. See gtm_list_workspaces.");
 
 export function registerReadTools(server: McpServer, ctx: GtmCtx): void {
+  // Bound once: every guard() below then times and records its tool call.
+  const guard = makeGuard(ctx);
+
   // -----------------------------------------------------------------------
   // gtm_list_accounts
   // -----------------------------------------------------------------------

@@ -66,6 +66,15 @@ new_sqlite_classes = ["GtmMCP"]
 binding = "OAUTH_KV"
 id = "00000000000000000000000000000000"
 
+# Analytics Engine: queryable time-series of tool calls and mutations. Workers
+# Logs answers "what happened in this incident"; this answers "how many writes
+# last month, by whom, with what error rate". The dataset is written to on
+# every tool call — see src/gtm/analytics.ts, which documents the POSITIONAL
+# blob/double schema. Do not reorder those fields once data exists.
+[[analytics_engine_datasets]]
+binding = "analytics_engine"
+dataset = "analytics_events"
+
 # ---------------------------------------------------------------------------
 # Workers Logs. `persist = true` is what makes the JSON log lines this Worker
 # emits queryable in the dashboard rather than only visible live via

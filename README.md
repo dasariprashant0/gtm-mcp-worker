@@ -156,6 +156,47 @@ the entity, and the outcome. Dry runs emit `mutation_dry_run`. Workers Logs is
 configured with `persist = true`, so these are queryable in the Cloudflare dashboard
 rather than only visible live via `wrangler tail`.
 
+## Telemetry
+
+Every tool call writes a row to the **Analytics Engine** dataset `analytics_events`
+(binding `analytics_engine`), and every mutation writes a second row carrying what
+was touched. Workers Logs answers "what happened in this incident"; this answers
+"how many writes last month, by whom, with what error rate".
+
+The schema is **positional** — Analytics Engine has no column names, only
+`blob1..blob20` and `double1..double20`. [src/gtm/analytics.ts](src/gtm/analytics.ts)
+documents every slot. Only ever append new fields at the end: inserting one in the
+middle silently reinterprets all historical rows, and nothing errors.
+
+Nothing from Tag Manager itself is recorded — no tag names, no parameter values, no
+container contents. Only which operation ran, on which IDs, by whom. `blob5` does
+carry the signed-in user's email, since "who changed this tag" is the point of an
+audit trail; swap it for `ctx.sub` in `analytics.ts` if you would rather it did not.
+
+Query it with the SQL API:
+
+```bash
+curl -s -X POST \
+  "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql" \
+  -H "Authorization: Bearer <TOKEN>" \
+  --data "SELECT blob3 AS tool, blob4 AS outcome, blob13 AS error_kind, double1 AS ms
+          FROM analytics_events FORMAT JSON"
+```
+
+Useful ones:
+
+| Question | Query |
+|---|---|
+| Error rate per tool | `SELECT blob3, AVG(double2) FROM analytics_events GROUP BY blob3` |
+| Writes that actually applied | `SELECT count() FROM analytics_events WHERE blob2='mutation' AND blob12='false'` |
+| Who is using it | `SELECT blob5, count() FROM analytics_events GROUP BY blob5` |
+| Quota pressure | `SELECT count() FROM analytics_events WHERE blob13='quota'` |
+| Guardrails firing | `SELECT blob13, count() FROM analytics_events WHERE blob4='error' GROUP BY blob13` |
+
+That last one is the interesting one: `blocked_by_allowlist`, `read_only_mode`,
+`default_workspace_refused`, `delete_unconfirmed` and `references_exist` all mean a
+safety layer did its job, and are worth watching rather than treating as noise.
+
 ## Quotas
 
 The Tag Manager API quota is **project-wide**, not per-container, and much tighter
