@@ -31,9 +31,13 @@ ALLOWED_EMAIL_DOMAIN = "example.com"
 GTM_MODE = "read_write"
 
 # Force every write to behave as dry_run=true regardless of what the caller
-# asks for. Leave "true" for the first week in production: the model sees the
-# exact request body it would have sent, and nothing changes in GTM.
-GTM_FORCE_DRY_RUN = "true"
+# asks for. Was "true" for the first week in production so the model could be
+# watched proposing exact request bodies without changing anything. Turned off
+# 2026-09-14 now that the behaviour has been observed; writes still land only in
+# a workspace, still cannot publish, and still cannot touch Default Workspace.
+# Set back to "true" at any time to freeze writes without redeploying anything
+# else.
+GTM_FORCE_DRY_RUN = "false"
 
 # Writes to a workspace literally named "Default Workspace" are refused, so
 # agent edits never mix into whatever a human has half-finished there.
