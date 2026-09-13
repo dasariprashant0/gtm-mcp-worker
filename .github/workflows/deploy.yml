@@ -68,4 +68,4 @@ jobs:
       - name: Confirm the deployed Worker is healthy
         run: |
           sleep 5
-          curl -sSf https://gtm-mcp-worker.YOUR-SUBDOMAIN.workers.dev/health | tee /dev/stderr | grep -q '"status":"ok"'
+          curl -sSf https://gtm-mcp-worker.YOUR-SUBDOMAIN.workers.dev/health | tee /dev/stderr | grep -qE '"status": *"ok"'
