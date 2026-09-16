@@ -17,6 +17,12 @@
  *
  * So: only ever APPEND new fields at the end, and never repurpose a slot.
  *
+ * AND THE SCHEMA IS SHARED. ga4-mcp-worker writes to this same dataset, from
+ * src/analytics.ts in that repo. A slot must mean the same thing in both, or
+ * the columns a cross-server query reads become nonsense. So append in BOTH
+ * repos, or not at all. `blob1` is what tells the two apart; ga4-mcp-worker
+ * leaves blob6-blob12 empty and double3 zero, because those are GTM-only.
+ *
  *   blob1  server            "gtm-mcp-worker"
  *   blob2  event             "tool" | "mutation"
  *   blob3  tool              tool name, e.g. "gtm_create_tag"
