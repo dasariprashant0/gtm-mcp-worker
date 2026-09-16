@@ -8,7 +8,7 @@
     "dev": "wrangler dev --env=\"\"",
     "deploy": "wrangler deploy --env=\"\"",
     "typecheck": "tsc --noEmit",
-    "check": "node scripts/check-allowlist.ts && node scripts/check-params.ts",
+    "check": "node scripts/check-allowlist.ts && node scripts/check-params.ts && node scripts/check-probe.ts",
     "dry-run": "wrangler deploy --dry-run --outdir=dist --env=\"\"",
     "verify": "npm run typecheck && npm run check && npm run dry-run",
     "tail": "wrangler tail --env=\"\" --format pretty"

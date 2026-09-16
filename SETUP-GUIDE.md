@@ -219,6 +219,8 @@ rather than retrying — the error hint says the same thing to the model.
 | 403 mentioning scopes | An operation this server deliberately cannot do. Use the GTM UI. |
 | 403 not mentioning scopes | Either no container permission for that person, or step 3 is not done. |
 | `invalid_grant` | Sign-in revoked or expired. Remove and re-add the connector. |
+| "Signed in — but this account has no Tag Manager access" | Working as intended. Sign-in succeeded; the person is not in Tag Manager. An admin adds them under Admin › User Management, per container. Nothing needs reconnecting afterwards. |
+| Tools return empty lists but sign-in worked | Same cause as above, seen after the fact. `gtm_list_accounts` returning `[]` means no GTM access, not a broken server. |
 | Writes refused, citing `GTM_MODE` | Step 7 stage 1. |
 | Writes return `dry_run: true` | Step 7 stage 2. |
 | "Refusing to write to the Default Workspace" | Working as intended. `gtm_create_workspace` first. |

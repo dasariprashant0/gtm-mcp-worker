@@ -27,6 +27,7 @@
  */
 
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import { probeTagManagerAccess } from "./gtm/http.ts";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -132,7 +133,10 @@ function htmlPage(title: string, body: string, status: number): Response {
       `<title>${title}</title>` +
       `<style>body{font:16px/1.6 system-ui,-apple-system,sans-serif;max-width:34rem;margin:12vh auto;padding:0 1.5rem;color:#111}` +
       `h1{font-size:1.3rem;margin:0 0 .75rem}code{background:#f3f3f3;padding:.1em .35em;border-radius:4px;font-size:.9em}` +
-      `.muted{color:#666;font-size:.9em}@media(prefers-color-scheme:dark){body{background:#111;color:#eee}code{background:#222}.muted{color:#999}}</style>` +
+      `.muted{color:#666;font-size:.9em}ul{padding-left:1.2rem}li{margin:.3rem 0}` +
+      `.btn{display:inline-block;margin-top:1.25rem;padding:.6em 1.1em;background:#1a73e8;color:#fff;` +
+      `text-decoration:none;border-radius:6px;font-size:.95em}.btn:hover{background:#1765cc}` +
+      `@media(prefers-color-scheme:dark){body{background:#111;color:#eee}code{background:#222}.muted{color:#999}}</style>` +
       body,
     { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
@@ -352,6 +356,73 @@ async function handleCallback(request: Request, env: OAuthEnv): Promise<Response
   });
 
   logJson({ event: "oauth_authorized", sub, email_domain: email.split("@")[1] ?? "unknown" });
+
+  // --- Tell them now if there is nothing for them to see ------------------
+  //
+  // Signing in and having Tag Manager access are separate things. Someone with
+  // the right email domain who was never added to GTM authenticates perfectly
+  // and then finds an empty list much later, inside a Claude conversation,
+  // where it looks like this server is broken. One request here answers that
+  // while they are still in a browser and can act on it.
+  //
+  // This is deliberately NOT a gate. The grant is already stored, so the page
+  // below is an interstitial with a Continue link rather than a refusal:
+  //   - the flow still completes, so the connector works;
+  //   - an admin can add them to GTM a minute later and everything starts
+  //     working with no need to reconnect;
+  //   - the read-only reference tools work regardless of GTM access.
+  // A probe failure is never allowed to change the outcome — it falls through
+  // to the ordinary redirect.
+  const probe = tokens.access_token
+    ? await probeTagManagerAccess(tokens.access_token)
+    : ({ kind: "unknown", detail: "no access_token in token response" } as const);
+
+  logJson({
+    event: "oauth_access_probe",
+    sub,
+    result: probe.kind,
+    ...(probe.kind === "ok" ? { accounts: probe.accountCount } : {}),
+    ...("detail" in probe ? { detail: probe.detail } : {}),
+  });
+
+  const cont =
+    `<p><a class="btn" href="${escapeHtml(redirectTo)}">Continue to Claude</a></p>` +
+    `<p class="muted">Your sign-in is already saved — continuing just hands control back to the ` +
+    `app that sent you here. Do it now rather than later; the handover code is short-lived.</p>`;
+
+  if (probe.kind === "no_accounts") {
+    return htmlPage(
+      "No Tag Manager access",
+      `<h1>Signed in — but this account has no Tag Manager access</h1>` +
+        `<p>You are signed in as <code>${escapeHtml(email)}</code>, and that part worked. Google ` +
+        `reports that this account can see <b>no Google Tag Manager accounts at all</b>, so every ` +
+        `tool will come back empty until someone grants you access.</p>` +
+        `<p>Ask a Tag Manager admin to add <code>${escapeHtml(email)}</code> in Tag Manager under ` +
+        `<b>Admin &rsaquo; User Management</b>:</p>` +
+        `<ul><li><b>View</b> on the container lets you read tags, triggers and variables.</li>` +
+        `<li><b>Edit</b> also lets you stage changes in a workspace.</li></ul>` +
+        `<p class="muted">Access is granted per container, not just per account — account-level ` +
+        `access alone is not enough. Nothing needs redoing here once they add you: this sign-in ` +
+        `keeps working and the tools simply start returning data.</p>` +
+        cont,
+      200,
+    );
+  }
+
+  if (probe.kind === "api_disabled") {
+    return htmlPage(
+      "Tag Manager API is not enabled",
+      `<h1>Signed in — but the Tag Manager API is switched off</h1>` +
+        `<p>Your sign-in worked. Google is refusing the request because the <b>Tag Manager API</b> ` +
+        `is not enabled on the Google Cloud project behind this server.</p>` +
+        `<p>This is a one-time setup step for whoever deployed it, not something you can fix: ` +
+        `Google Cloud Console &rsaquo; APIs &amp; Services &rsaquo; Library &rsaquo; ` +
+        `<b>Tag Manager API</b> &rsaquo; Enable. It affects everyone, not just you.</p>` +
+        cont,
+      200,
+    );
+  }
+
   return Response.redirect(redirectTo, 302);
 }
 

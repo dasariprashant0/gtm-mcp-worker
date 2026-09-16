@@ -361,3 +361,92 @@ export async function resolveContainerRef(
     resolvedFrom: { destinationId: ref.destinationId, via: "accounts/containers:lookup" },
   };
 }
+
+// ===========================================================================
+// Sign-in access probe
+// ===========================================================================
+//
+// Called once from /callback, immediately after a user signs in.
+//
+// WHY THIS EXISTS. Signing in and having Tag Manager access are independent:
+// ALLOWED_EMAIL_DOMAIN decides who may connect, and Google's own ACL decides
+// what they can see. Someone at the right company who was never added to GTM
+// authenticates perfectly and then gets an empty list — later, inside a Claude
+// conversation, where it reads like this server is broken. One request at
+// sign-in turns that into a plain sentence while they are still in a browser.
+//
+// It lives in this file rather than in google-oauth.ts so the invariant holds:
+// every call to the Tag Manager API goes through here, and through
+// assertAllowed.
+
+export type AccessProbe =
+  | { kind: "ok"; accountCount: number }
+  | { kind: "no_accounts" }
+  | { kind: "api_disabled"; detail: string }
+  | { kind: "unknown"; detail: string };
+
+/**
+ * Classify the response to GET /accounts.
+ *
+ * Pure, and exported, because the two branches that matter are the ones that
+ * are painful to reach live — you would need a colleague with no GTM access,
+ * or to switch the Tag Manager API off in production. scripts/check-probe.ts
+ * covers them instead.
+ */
+export function classifyAccessResponse(status: number, raw: string): AccessProbe {
+  if (status >= 200 && status < 300) {
+    let count = 0;
+    try {
+      const body = JSON.parse(raw || "{}") as { account?: unknown };
+      // GTM omits the key entirely rather than returning [] when there is
+      // nothing, so absent and empty must both mean "no accounts".
+      count = Array.isArray(body.account) ? body.account.length : 0;
+    } catch {
+      return { kind: "unknown", detail: "unparseable success body" };
+    }
+    return count > 0 ? { kind: "ok", accountCount: count } : { kind: "no_accounts" };
+  }
+
+  // Google phrases "the API is not turned on" several different ways depending
+  // on which check fired, so match on the family rather than one string.
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("accessnotconfigured") ||
+    lower.includes("has not been used in project") ||
+    lower.includes("service_disabled") ||
+    lower.includes("api is disabled") ||
+    lower.includes("it is disabled")
+  ) {
+    return { kind: "api_disabled", detail: truncate(raw, 400) };
+  }
+
+  return { kind: "unknown", detail: `HTTP ${status}: ${truncate(raw, 200)}` };
+}
+
+/**
+ * Ask Google which Tag Manager accounts this freshly signed-in user can see.
+ *
+ * NEVER throws. A probe failure must not be able to break sign-in: the worst
+ * outcome permitted here is that we skip the interstitial and let the user
+ * through exactly as they would have gone through before this existed.
+ */
+export async function probeTagManagerAccess(accessToken: string): Promise<AccessProbe> {
+  const url = `${BASE}/accounts`;
+  try {
+    assertAllowed(url, "GET");
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "user-agent": USER_AGENT,
+        accept: "application/json",
+      },
+    });
+    return classifyAccessResponse(res.status, await res.text());
+  } catch (err) {
+    return {
+      kind: "unknown",
+      detail: truncate(err instanceof Error ? err.message : String(err), 200),
+    };
+  }
+}
