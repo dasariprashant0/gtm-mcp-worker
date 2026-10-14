@@ -17,6 +17,9 @@
 #   Cloudflare dashboard -> My Profile -> API Tokens -> Create Token
 #   -> "Edit Cloudflare Workers" template, scoped to this account.
 #   Then: gh secret set CLOUDFLARE_API_TOKEN --repo dasariprashant0/gtm-mcp-worker
+#   Without the secret the deploy job skips itself, so forks and this public copy stay green.
+#   Optional: a repository variable WORKER_URL (https://<name>.<subdomain>.workers.dev)
+#   enables the post-deploy health check.
 
 name: Verify and deploy
 
@@ -61,11 +64,25 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - name: Check for a Cloudflare token
+        id: token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No CLOUDFLARE_API_TOKEN secret is set, so nothing deploys from this run."
+          fi
       - uses: cloudflare/wrangler-action@v3
+        if: steps.token.outputs.present == 'true'
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy --env=""
       - name: Confirm the deployed Worker is healthy
+        if: steps.token.outputs.present == 'true' && vars.WORKER_URL != ''
+        env:
+          WORKER_URL: ${{ vars.WORKER_URL }}
         run: |
           sleep 5
-          curl -sSf https://gtm-mcp-worker.YOUR-SUBDOMAIN.workers.dev/health | tee /dev/stderr | grep -qE '"status": *"ok"'
+          curl -sSf "$WORKER_URL/health" | tee /dev/stderr | grep -qE '"status": *"ok"'
